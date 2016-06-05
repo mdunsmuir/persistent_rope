@@ -1,5 +1,5 @@
 [package]
-name = "moneta_rope"
+name = "persistent_rope"
 version = "0.1.0"
 authors = ["Michael Dunsmuir <mjdunsmuir@gmail.com>"]
 
