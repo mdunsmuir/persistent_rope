@@ -1,7 +1,8 @@
 use std::rc::*;
-use std::cell::RefCell;
+use std::cell::{RefCell, Ref};
 use std::ops::DerefMut;
 use std::collections::VecDeque;
+use std::marker::PhantomData;
 
 type Rrcc<T> = Rc<RefCell<T>>;
 type Wrc<T> = Weak<RefCell<T>>;
@@ -23,11 +24,24 @@ enum Node<T> {
     },
 }
 
+#[derive(Debug)]
+pub struct Rope<T> {
+    root: DownLink<T>,
+    fragment_size: usize,
+}
+
+pub struct Cursor<'a, T: 'a> {
+    ptr: Rrcc<Node<T>>,
+    at: usize,
+    fragment_start: usize,
+    phantom_data: PhantomData<&'a T>,
+}
+
 use self::Node::*;
 
 impl <T> Node<T> {
 
-    /// The length of the string stored under this Node
+    /// The length of the sequence stored under this Node
     pub fn len(&self) -> usize {
         match self {
             &Leaf { ref fragment, .. } => fragment.len(),
@@ -43,13 +57,14 @@ impl <T> Node<T> {
 
 }
 
-#[derive(Debug)]
-pub struct Rope<T> {
-    root: DownLink<T>,
-    fragment_size: usize,
-}
-
 impl <T: Copy> Rope<T> {
+
+    pub fn len(&self) -> usize {
+        match self.root {
+            Some(ref node_rrcc) => node_rrcc.borrow().len(),
+            None => 0,
+        }
+    }
 
     pub fn from_slice(source: &[T], fragment_size: usize) -> Self {
         let n_fragments = source.len() / fragment_size + 1;
@@ -158,6 +173,26 @@ impl <T: Copy> Rope<T> {
     }
 
 }
+
+impl <'a, T> Cursor<'a, T> {
+
+    pub fn new<'b: 'a>(rope: &'b Rope<T>) -> Self {
+        unimplemented!();
+    }
+
+    pub fn get(&self) -> Ref<T> {
+        let i_fragment = self.at - self.fragment_start;
+
+        Ref::map(self.ptr.borrow(), |node| {
+            match node {
+                &Stem { .. } => panic!("expected Leaf"),
+                &Leaf { ref fragment, .. } => &fragment[i_fragment],
+            }
+        })
+    }
+
+}
+
 
 #[cfg(test)]
 mod tests;
