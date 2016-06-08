@@ -1,8 +1,4 @@
 use std::rc::*;
-use std::cell::{RefCell, Ref};
-use std::ops::DerefMut;
-use std::collections::VecDeque;
-use std::marker::PhantomData;
 
 type Rrcc<T> = Rc<RefCell<T>>;
 type Wrc<T> = Weak<RefCell<T>>;
@@ -39,10 +35,25 @@ pub struct Cursor<'a, T: 'a> {
 
 use self::Node::*;
 
+macro_rules! child_accessor {
+    ($child_name:ident) => (
+        fn $child_name(&self) -> Option<Ref<Self>> {
+            match self {
+                &Leaf { .. } => None,
+                &Stem { $child_name: ref child_ref, .. } =>
+                    child_ref.as_ref().map(|rrcc| {
+                        rrcc.as_ref().borrow()
+                    }),
+            }
+        }
+    )
+}
+
+
 impl <T> Node<T> {
 
     /// The length of the sequence stored under this Node
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         match self {
             &Leaf { ref fragment, .. } => fragment.len(),
 
@@ -55,16 +66,12 @@ impl <T> Node<T> {
         }
     }
 
+    child_accessor!(left);
+    child_accessor!(right);
+
 }
 
 impl <T: Copy> Rope<T> {
-
-    pub fn len(&self) -> usize {
-        match self.root {
-            Some(ref node_rrcc) => node_rrcc.borrow().len(),
-            None => 0,
-        }
-    }
 
     pub fn from_slice(source: &[T], fragment_size: usize) -> Self {
         let n_fragments = source.len() / fragment_size + 1;
@@ -161,6 +168,76 @@ impl <T: Copy> Rope<T> {
             dq_a = dq_b;
             dq_b = dq_swap;
         } // end loop
+    }
+
+}
+
+impl <T> Rope<T> {
+
+    /// Get the length of the sequence contained in this Rope.
+    pub fn len(&self) -> usize {
+        match self.root {
+            Some(ref node_rrcc) => node_rrcc.borrow().len(),
+            None => 0,
+        }
+    }
+
+    /// For some index, return the leaf node whose fragment contains that
+    /// index, and the offset from zero at the beginning of that node's
+    /// fragment.
+    fn leaf_and_offset_for_index(&self, mut index: usize) ->
+        Option<(Ref<Node<T>>, usize)> {
+
+        // extract the root node, we'll use this as our working pointer
+        let mut ptr: Ref<Node<T>> = if self.len() == 0 {
+            return None
+        } else if let Some(ref ptr) = self.root {
+            ptr.as_ref().borrow()
+        } else {
+            panic!("len 0 but root is None")
+        };
+
+        // we'll use this to track a cumulative offset whenever we visit a
+        // right child
+        let mut offset: usize = 0;
+
+        // loop to traverse down the tree until a Leaf
+        loop { // &Stem { weight, ref left, ref right, .. } = ptr.borrow().deref() {
+
+            let weight = match ptr.deref() {
+                &Leaf { .. } => break, // we're done descending
+                &Stem { weight, .. } => weight,
+            };
+
+            // if index is less than the weight of this node, we go down the
+            // left subtree. The offset doesn't change.
+            if index < weight {
+
+                /*
+                let ptr = Ref::map(ptr, |node| {
+                    match node {
+                        &Stem { ref left 
+                })
+
+                let tmp_ptr = match ptr.as_ref().deref() {
+                    &Stem { ref left, ..} => match left {
+                        &Some(ref child_ptr) => child_ptr,
+                        _ => panic!("found no left subtree when weight > 0"),
+                    },
+                    _ => panic!("should be Stem"),
+                };
+
+                ptr = tmp_ptr;
+                */
+
+            } else {
+
+            }
+
+
+        }
+
+        unimplemented!();
     }
 
     fn set_parent(child: &Rrcc<Node<T>>, parent_weak: Wrc<Node<T>>) {
