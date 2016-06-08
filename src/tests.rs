@@ -1,13 +1,17 @@
 use super::*;
 
-#[test]
-fn from_slice() {
-    let vec = vec![0; 20];
-    Rope::from_slice(vec.as_slice(), 3);
+fn sample_rope() -> Rope<usize> {
+    let v1 = vec![1, 2, 3];
+    let v2 = vec![4, 5, 6];
+    let v3 = vec![7, 8, 9];
+
+    Rope::concat(Rope::new(v1), Rope::concat(Rope::new(v2), Rope::new(v3)))
 }
 
 #[test]
-fn len() {
-    let vec = vec![0; 20];
-    assert_eq!(20, Rope::from_slice(vec.as_slice(), 3).len());
+fn basic_indexing() {
+    let rope = sample_rope();
+    for i in 1..9 {
+        assert_eq!(i, *rope.at(i - 1));
+    }
 }
