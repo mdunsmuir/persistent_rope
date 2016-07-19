@@ -1,7 +1,7 @@
 use std::rc::*;
 use std::cmp::{max};
 
-type Link<T> = Option<Rc<Node<T>>>;
+type Link<T> = Rc<Node<T>>;
 
 #[derive(Debug)]
 enum Node<T> {
@@ -21,7 +21,7 @@ use Node::*;
 
 #[derive(Debug)]
 pub struct Rope<T> {
-    root: Rc<Node<T>>,
+    root: Link<T>,
 }
 
 impl <T: Clone> Node<T> {
@@ -55,8 +55,8 @@ impl <T: Clone> Node<T> {
             depth: max(left.depth(), right.depth()),
             left_len: left.len(),
             len: left.len() + right.len(),
-            left: Some(left.clone()),
-            right: Some(right.clone()),
+            left: left.clone(),
+            right: right.clone(),
         })
     }
 
@@ -77,8 +77,8 @@ impl <T: Clone> Node<T> {
 
                 // if the substring straddles this concat node
                 if do_left && do_right {
-                    let left = o_left.as_ref().unwrap();
-                    let right = o_right.as_ref().unwrap();
+                    let left = o_left.as_ref();
+                    let right = o_right.as_ref();
 
                     let left_sub = left.substring(start, left_len);
                     let right_sub = right.substring(0, end - left_len);
@@ -87,9 +87,9 @@ impl <T: Clone> Node<T> {
                 
                 // if we're substringing one side or the other
                 } else if do_left {
-                    o_left.as_ref().unwrap().substring(start, end)
+                    o_left.as_ref().substring(start, end)
                 } else if do_right {
-                    o_right.as_ref().unwrap().substring(0, end - left_len)
+                    o_right.as_ref().substring(0, end - left_len)
 
                 // do people do this? I don't know
                 } else {
@@ -114,10 +114,7 @@ impl <T: Clone> Node<T> {
                         (right, index - left_len)
                     };
 
-                match child {
-                    &None => panic!("expected a child, but none found"),
-                    &Some(ref child) => child.at(new_index),
-                }
+                child.at(new_index)
             },
         }
     }
