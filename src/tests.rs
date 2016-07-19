@@ -15,3 +15,12 @@ fn basic_indexing() {
         assert_eq!(i, *rope.at(i - 1));
     }
 }
+
+#[test]
+fn substring() {
+    let base = sample_rope();
+    let sub = base.substring(1, 5);
+    for i in 0..4 {
+        assert_eq!(base.at(i + 1), sub.at(i))
+    }
+}

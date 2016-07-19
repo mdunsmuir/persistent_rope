@@ -24,7 +24,7 @@ pub struct Rope<T> {
     root: Rc<Node<T>>,
 }
 
-impl <T> Node<T> {
+impl <T: Clone> Node<T> {
 
     fn depth(&self) -> usize {
         match self {
@@ -60,6 +60,45 @@ impl <T> Node<T> {
         })
     }
 
+    /// Create a substring of a Rope
+    /// start is inclusive, end is EXclusive.
+    fn substring(&self, start: usize, end: usize) -> Rc<Self> {
+        match self {
+            &Flat { ref data } => {
+                // TODO: hopefully rust itself will panic on OOB indices here?
+                let mut slice = Vec::with_capacity(end - start);
+                slice.extend_from_slice(&data[start..end]);
+                Rc::new(Flat { data: slice })
+            },
+
+            &Concat { left_len, left: ref o_left, right: ref o_right, .. } => {
+                let do_left = start < left_len;
+                let do_right = end >= left_len;
+
+                // if the substring straddles this concat node
+                if do_left && do_right {
+                    let left = o_left.as_ref().unwrap();
+                    let right = o_right.as_ref().unwrap();
+
+                    let left_sub = left.substring(start, left_len);
+                    let right_sub = right.substring(0, end - left_len);
+
+                    Self::concat(&left_sub, &right_sub)
+                
+                // if we're substringing one side or the other
+                } else if do_left {
+                    o_left.as_ref().unwrap().substring(start, end)
+                } else if do_right {
+                    o_right.as_ref().unwrap().substring(0, end - left_len)
+
+                // do people do this? I don't know
+                } else {
+                    panic!("should not have gotten here!")
+                }
+            }
+        }
+    }
+
     fn at(&self, index: usize) -> &T {
         if index >= self.len() {
             panic!("index exceeds bounds (length {:?}, index {:?})", self.len(), index)
@@ -85,7 +124,7 @@ impl <T> Node<T> {
 
 }
 
-impl <T> Rope<T> {
+impl <T: Clone> Rope<T> {
 
     pub fn new(data: Vec<T>) -> Self {
         Rope {
@@ -100,6 +139,16 @@ impl <T> Rope<T> {
     pub fn concat(left: Self, right: Self) -> Self {
         Rope {
             root: Node::concat(&left.root, &right.root),
+        }
+    }
+
+    pub fn substring(&self, start: usize, end: usize) -> Self {
+        if start >= end || end >= self.len() {
+            panic!("bad substring indices: {}, {}", start, end);
+        }
+
+        Rope {
+            root: self.root.substring(start, end),
         }
     }
 
