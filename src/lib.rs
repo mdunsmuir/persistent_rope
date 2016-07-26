@@ -1,3 +1,5 @@
+use std::slice::Iter;
+use std::borrow::Borrow;
 use std::rc::*;
 use std::cmp::{max};
 
@@ -22,6 +24,12 @@ use Node::*;
 #[derive(Debug)]
 pub struct Rope<T> {
     root: Link<T>,
+}
+
+#[derive(Debug)]
+pub struct RopeIter<'a, T: 'a> {
+    stack: Vec<Link<T>>,
+    flat_iter: Iter<'a, T>,
 }
 
 impl <T: Clone> Node<T> {
@@ -153,6 +161,69 @@ impl <T: Clone> Rope<T> {
         self.root.at(index)
     }
 
+    pub fn iter(&self) -> RopeIter<T> {
+        RopeIter::new(&self.root)
+    }
+
+}
+
+impl <'a, T: Clone> RopeIter<'a, T> {
+
+    fn new(root: &'a Link<T>) -> Self {
+        let mut stack: Vec<Link<T>> = Vec::with_capacity(root.depth());
+        let mut current: &Link<T> = root;
+        
+        loop {
+            stack.push(current.clone());
+
+            match current.borrow() {
+                &Flat { ref data, .. } => {
+                    return RopeIter {
+                        stack: stack,
+                        flat_iter: data.iter(),
+                    };
+                },
+
+                &Concat { ref left, .. } => {
+                    current = left;
+                },
+            }
+        } // end loop
+    }
+}
+
+impl <'a, T: Clone> Iterator for RopeIter<'a, T> {
+
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let from_inner = self.flat_iter.next();
+
+        match from_inner {
+            Some(item) => Some(item),
+
+            // when we're done with the leaf we're currently on
+            None => {
+                self.stack.pop();
+
+                if let Some(parent_rc) = self.stack.last() {
+                    let right = match parent_rc.borrow() {
+                        &Concat { ref right, .. } => right.clone(),
+                        &Flat { .. } => panic!("did not expect Flat in iter stack"),
+                    };
+
+                    // TODO: need tree traversal loop here
+
+                    unimplemented!();
+                    //self.stack.push
+
+                // if we're done iterating
+                } else {
+                    None
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
