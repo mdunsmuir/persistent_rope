@@ -20,7 +20,7 @@ mod indexing {
     fn flat() {
         let rope = sample_flat_rope();
         for i in 0..2 {
-            assert_eq!(i, *rope.at(i));
+            assert_eq!(i, rope[i]);
         }
     }
 
@@ -28,42 +28,57 @@ mod indexing {
     fn deep() {
         let rope = sample_deep_rope();
         for i in 0..8 {
-            assert_eq!(i, *rope.at(i));
+            assert_eq!(i, rope[i]);
         }
     }
 
     #[test]
     #[should_panic]
     fn flat_panic_on_out_of_bounds() {
-        sample_flat_rope().at(3);
+        sample_flat_rope()[3];
     }
 
     #[test]
     #[should_panic]
     fn deep_panic_on_out_of_bounds() {
-        sample_flat_rope().at(9);
+        sample_flat_rope()[9];
     }
+}
+
+mod iteration {
+
+    use super::*;
+
+    #[test]
+    fn flat() {
+        let rope = sample_flat_rope();
+        assert_eq!(vec![0, 1, 2], rope.iter().map(|&x| x).collect(): Vec<usize>);
+    }
+
+    #[test]
+    fn deep() {
+        let rope = sample_deep_rope();
+        let exp = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
+        assert_eq!(exp, rope.iter().map(|&x| x).collect(): Vec<usize>);
+    }
+
 }
 
 mod substring {
 
     use super::*;
 
-    /*
     #[test]
     fn flat() {
         let base = sample_flat_rope();
-
-        
+        let sub = base.substring(1, 3);
+        assert_eq!(vec![1, 2], sub.iter().map(|&x| x).collect(): Vec<usize>);
     }
-    */
 
     #[test]
     fn deep() {
         let base = sample_deep_rope();
         let sub = base.substring(1, 5);
-        for i in 0..4 {
-            assert_eq!(base.at(i + 1), sub.at(i))
-        }
+        assert_eq!(vec![1, 2, 3, 4], sub.iter().map(|&x| x).collect(): Vec<usize>);
     }
 }

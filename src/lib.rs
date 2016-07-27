@@ -1,5 +1,8 @@
+#![feature(type_ascription)]
+
 use std::slice::Iter;
 use std::borrow::Borrow;
+use std::ops::Index;
 use std::rc::*;
 use std::cmp::{max};
 
@@ -28,7 +31,7 @@ pub struct Rope<T> {
 
 #[derive(Debug)]
 pub struct RopeIter<'a, T: 'a> {
-    stack: Vec<Link<T>>,
+    stack: Vec<&'a Link<T>>,
     flat_iter: Iter<'a, T>,
 }
 
@@ -40,15 +43,6 @@ impl <T: Clone> Node<T> {
             &Flat { .. } => 0,
         }
     }
-
-    /*
-    fn left_len(&self) -> usize {
-        match self {
-            &Concat { left_len, .. } => left_len,
-            &Flat { ref data } => data.len(),
-        }
-    }
-    */
 
     fn len(&self) -> usize {
         match self {
@@ -148,7 +142,7 @@ impl <T: Clone> Rope<T> {
     }
 
     pub fn substring(&self, start: usize, end: usize) -> Self {
-        if start >= end || end >= self.len() {
+        if start >= end || end > self.len() {
             panic!("bad substring indices: {}, {}", start, end);
         }
 
@@ -157,26 +151,28 @@ impl <T: Clone> Rope<T> {
         }
     }
 
-    pub fn at(&self, index: usize) -> &T {
-        self.root.at(index)
-    }
-
     pub fn iter(&self) -> RopeIter<T> {
         RopeIter::new(&self.root)
     }
 
 }
 
+impl <T: Clone> Index<usize> for Rope<T> {
+
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.root.at(index)
+    }
+}
+
 impl <'a, T: Clone> RopeIter<'a, T> {
 
-    fn new(root: &'a Link<T>) -> Self {
-        let mut stack: Vec<Link<T>> = Vec::with_capacity(root.depth());
-        let mut current: &Link<T> = root;
-        
-        loop {
-            stack.push(current.clone());
+    fn new(mut ptr: &'a Link<T>) -> Self {
+        let mut stack: Vec<&'a Link<T>> = Vec::with_capacity(ptr.depth());
 
-            match current.borrow() {
+        loop {
+            match ptr.borrow() {
                 &Flat { ref data, .. } => {
                     return RopeIter {
                         stack: stack,
@@ -185,7 +181,8 @@ impl <'a, T: Clone> RopeIter<'a, T> {
                 },
 
                 &Concat { ref left, .. } => {
-                    current = left;
+                    stack.push(ptr);
+                    ptr = left;
                 },
             }
         } // end loop
@@ -197,32 +194,52 @@ impl <'a, T: Clone> Iterator for RopeIter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let from_inner = self.flat_iter.next();
 
-        match from_inner {
-            Some(item) => Some(item),
+        // get the next from the iterator on the flat node we're currently
+        // pointing at
+        match self.flat_iter.next() {
+            // if result then just return it
+            result@Some(_) => result,
 
-            // when we're done with the leaf we're currently on
+            // otherwise we need to navigate to the next flat node
             None => {
-                self.stack.pop();
+                match self.stack.pop() {
 
-                if let Some(parent_rc) = self.stack.last() {
-                    let right = match parent_rc.borrow() {
-                        &Concat { ref right, .. } => right.clone(),
-                        &Flat { .. } => panic!("did not expect Flat in iter stack"),
-                    };
+                    // if no nodes are left on the stack we're done
+                    None => None,
 
-                    // TODO: need tree traversal loop here
+                    // if a node is on the stack, we already visited its left
+                    // children, so go right now and drop the ref to the
+                    // popped node
+                    Some(rc_ref) => {
+                        if let &Concat { ref right, .. } = rc_ref.as_ref() {
+                            let mut current = right;
 
-                    unimplemented!();
-                    //self.stack.push
+                            // Go left all the way to the next leaf
+                            while let &Concat { ref left, .. } = current.as_ref() {
+                                self.stack.push(current);
+                                current = left;
+                            }
 
-                // if we're done iterating
-                } else {
-                    None
-                }
+                            // load the iterator from this leaf
+                            // we finish with the recursive call so that in the
+                            // event that this leaf is empty (should not happen
+                            // but...) we'll continue on to the next leaf
+                            if let &Flat { ref data } = current.as_ref() {
+                                self.flat_iter = data.iter();
+                                self.next()
+
+                            } else {
+                                panic!("should never get here")
+                            }
+
+                        } else {
+                            panic!("expected only Concat in iter stack")
+                        }
+                    }
+                } // match stack pop
             }
-        }
+        } // match current iter next
     }
 }
 
