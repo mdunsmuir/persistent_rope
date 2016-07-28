@@ -9,36 +9,40 @@ use std::ops::Index;
 use std::rc::*;
 use std::cmp::{max};
 
-type Link<T> = Rc<Node<T>>;
+use std::hash::Hash;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::BTreeMap;
 
-#[derive(Debug)]
-enum Node<T> {
+type Link<T, M> = Rc<Node<T, M>>;
+
+enum Node<T, M> {
     Concat {
         depth: usize,
         left_len: usize,
+        markers: HashMap<M, (usize, usize)>,
         len: usize,
-        left: Link<T>,
-        right: Link<T>,
+        left: Link<T, M>,
+        right: Link<T, M>,
     },
     Flat {
         data: Vec<T>,
+        markers: BTreeMap<usize, HashSet<M>>,
     },
 }
 
 use Node::*;
 
-#[derive(Debug)]
-pub struct Rope<T> {
-    root: Link<T>,
+pub struct Rope<T, M = ()> {
+    root: Link<T, M>,
 }
 
-#[derive(Debug)]
-pub struct RopeIter<'a, T: 'a> {
-    stack: Vec<&'a Link<T>>,
+pub struct RopeIter<'a, T: 'a, M: 'a + Eq + Hash> {
+    stack: Vec<&'a Link<T, M>>,
     flat_iter: Iter<'a, T>,
 }
 
-impl <T: Clone> Node<T> {
+impl<T: Clone, M: Eq + Hash> Node<T, M> {
 
     fn depth(&self) -> usize {
         match *self {
@@ -50,7 +54,7 @@ impl <T: Clone> Node<T> {
     fn len(&self) -> usize {
         match *self {
             Concat { len, .. } => len,
-            Flat { ref data } => data.len(),
+            Flat { ref data, .. } => data.len(),
         }
     }
 
@@ -59,21 +63,20 @@ impl <T: Clone> Node<T> {
         Rc::new(Concat {
             depth: max(left.depth(), right.depth()),
             left_len: left.len(),
+            markers: HashMap::new(),
             len: left.len() + right.len(),
             left: left.clone(),
             right: right.clone(),
         })
     }
 
-    /// Create a substring of a Rope
-    /// start is inclusive, end is EXclusive.
     fn substring(&self, start: usize, end: usize) -> Rc<Self> {
         match *self {
-            Flat { ref data } => {
+            Flat { ref data, .. } => {
                 // TODO: hopefully rust itself will panic on OOB indices here?
                 let mut slice = Vec::with_capacity(end - start);
                 slice.extend_from_slice(&data[start..end]);
-                Rc::new(Flat { data: slice })
+                Rc::new(Flat { data: slice, markers: BTreeMap::new() })
             },
 
             Concat { left_len, left: ref o_left, right: ref o_right, .. } => {
@@ -110,7 +113,7 @@ impl <T: Clone> Node<T> {
         }
 
         match *self {
-            Flat { ref data } => &data[index], // we already checked the bounds
+            Flat { ref data, .. } => &data[index], // we already checked the bounds
             Concat { left_len, ref left, ref right, .. } => {
                 let (child, new_index) = 
                     if index < left_len {
@@ -126,11 +129,11 @@ impl <T: Clone> Node<T> {
 
 }
 
-impl <T: Clone> Rope<T> {
+impl<T: Clone, M: Eq + Hash> Rope<T, M> {
 
     pub fn new(data: Vec<T>) -> Self {
         Rope {
-            root: Rc::new( Flat { data: data } ),
+            root: Rc::new( Flat { data: data, markers: BTreeMap::new() } ),
         }
     }
 
@@ -148,6 +151,7 @@ impl <T: Clone> Rope<T> {
         }
     }
 
+    /// `start` is inclusive, `end` is EXclusive.
     pub fn substring(&self, start: usize, end: usize) -> Self {
         if start >= end || end > self.len() {
             panic!("bad substring indices: {}, {}", start, end);
@@ -158,13 +162,13 @@ impl <T: Clone> Rope<T> {
         }
     }
 
-    pub fn iter(&self) -> RopeIter<T> {
+    pub fn iter(&self) -> RopeIter<T, M> {
         RopeIter::new(&self.root)
     }
 
 }
 
-impl <T: Clone> Index<usize> for Rope<T> {
+impl<T: Clone, M: Eq + Hash> Index<usize> for Rope<T, M> {
 
     type Output = T;
 
@@ -173,10 +177,10 @@ impl <T: Clone> Index<usize> for Rope<T> {
     }
 }
 
-impl <'a, T: Clone> RopeIter<'a, T> {
+impl<'a, T: Clone, M: Eq + Hash> RopeIter<'a, T, M> {
 
-    fn new(mut ptr: &'a Link<T>) -> Self {
-        let mut stack: Vec<&'a Link<T>> = Vec::with_capacity(ptr.depth());
+    fn new(mut ptr: &'a Link<T, M>) -> Self {
+        let mut stack: Vec<&'a Link<T, M>> = Vec::with_capacity(ptr.depth());
 
         loop {
             match *ptr.borrow() {
@@ -196,7 +200,7 @@ impl <'a, T: Clone> RopeIter<'a, T> {
     }
 }
 
-impl <'a, T: Clone> Iterator for RopeIter<'a, T> {
+impl<'a, T: Clone, M: Eq + Hash> Iterator for RopeIter<'a, T, M> {
 
     type Item = &'a T;
 
@@ -232,7 +236,7 @@ impl <'a, T: Clone> Iterator for RopeIter<'a, T> {
                             // we finish with the recursive call so that in the
                             // event that this leaf is empty (should not happen
                             // but...) we'll continue on to the next leaf
-                            if let Flat { ref data } = *current.as_ref() {
+                            if let Flat { ref data, .. } = *current.as_ref() {
                                 self.flat_iter = data.iter();
                                 self.next()
 

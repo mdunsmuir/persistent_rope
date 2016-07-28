@@ -14,7 +14,7 @@ pub fn sample_deep_rope() -> Rope<usize> {
 
 #[test]
 fn length() {
-    let empty_rope = Rope::new(Vec::new(): Vec<usize>);
+    let empty_rope: Rope<usize> = Rope::new(Vec::new(): Vec<usize>);
     assert_eq!(0, empty_rope.len());
     assert!(empty_rope.is_empty());
 
