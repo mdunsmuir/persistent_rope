@@ -3,4 +3,9 @@ name = "persistent_rope"
 version = "0.1.0"
 authors = ["Michael Dunsmuir <mjdunsmuir@gmail.com>"]
 
+[features]
+
+lint = ["clippy"]
+
 [dependencies]
+clippy = { version = "*", optional = true }

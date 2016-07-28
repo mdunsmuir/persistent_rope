@@ -12,6 +12,21 @@ pub fn sample_deep_rope() -> Rope<usize> {
     Rope::concat(Rope::new(v1), Rope::concat(Rope::new(v2), Rope::new(v3)))
 }
 
+#[test]
+fn length() {
+    let empty_rope = Rope::new(Vec::new(): Vec<usize>);
+    assert_eq!(0, empty_rope.len());
+    assert!(empty_rope.is_empty());
+
+    let flat_rope = sample_flat_rope();
+    assert_eq!(3, flat_rope.len());
+    assert!(!flat_rope.is_empty());
+
+    let deep_rope = sample_deep_rope();
+    assert_eq!(9, deep_rope.len());
+    assert!(!deep_rope.is_empty());
+}
+
 mod indexing {
 
     use super::*;
@@ -52,14 +67,14 @@ mod iteration {
     #[test]
     fn flat() {
         let rope = sample_flat_rope();
-        assert_eq!(vec![0, 1, 2], rope.iter().map(|&x| x).collect(): Vec<usize>);
+        assert_eq!(vec![0, 1, 2], rope.iter().cloned().collect(): Vec<usize>);
     }
 
     #[test]
     fn deep() {
         let rope = sample_deep_rope();
         let exp = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
-        assert_eq!(exp, rope.iter().map(|&x| x).collect(): Vec<usize>);
+        assert_eq!(exp, rope.iter().cloned().collect(): Vec<usize>);
     }
 
 }
@@ -72,13 +87,13 @@ mod substring {
     fn flat() {
         let base = sample_flat_rope();
         let sub = base.substring(1, 3);
-        assert_eq!(vec![1, 2], sub.iter().map(|&x| x).collect(): Vec<usize>);
+        assert_eq!(vec![1, 2], sub.iter().cloned().collect(): Vec<usize>);
     }
 
     #[test]
     fn deep() {
         let base = sample_deep_rope();
         let sub = base.substring(1, 5);
-        assert_eq!(vec![1, 2, 3, 4], sub.iter().map(|&x| x).collect(): Vec<usize>);
+        assert_eq!(vec![1, 2, 3, 4], sub.iter().cloned().collect(): Vec<usize>);
     }
 }

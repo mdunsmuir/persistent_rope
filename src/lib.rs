@@ -1,5 +1,8 @@
 #![feature(type_ascription)]
 
+#![cfg_attr(feature = "lint", feature(plugin))]
+#![cfg_attr(feature = "lint", plugin(clippy))]
+
 use std::slice::Iter;
 use std::borrow::Borrow;
 use std::ops::Index;
@@ -38,16 +41,16 @@ pub struct RopeIter<'a, T: 'a> {
 impl <T: Clone> Node<T> {
 
     fn depth(&self) -> usize {
-        match self {
-            &Concat { depth, .. } => depth,
-            &Flat { .. } => 0,
+        match *self {
+            Concat { depth, .. } => depth,
+            Flat { .. } => 0,
         }
     }
 
     fn len(&self) -> usize {
-        match self {
-            &Concat { len, .. } => len,
-            &Flat { ref data } => data.len(),
+        match *self {
+            Concat { len, .. } => len,
+            Flat { ref data } => data.len(),
         }
     }
 
@@ -65,15 +68,15 @@ impl <T: Clone> Node<T> {
     /// Create a substring of a Rope
     /// start is inclusive, end is EXclusive.
     fn substring(&self, start: usize, end: usize) -> Rc<Self> {
-        match self {
-            &Flat { ref data } => {
+        match *self {
+            Flat { ref data } => {
                 // TODO: hopefully rust itself will panic on OOB indices here?
                 let mut slice = Vec::with_capacity(end - start);
                 slice.extend_from_slice(&data[start..end]);
                 Rc::new(Flat { data: slice })
             },
 
-            &Concat { left_len, left: ref o_left, right: ref o_right, .. } => {
+            Concat { left_len, left: ref o_left, right: ref o_right, .. } => {
                 let do_left = start < left_len;
                 let do_right = end >= left_len;
 
@@ -106,9 +109,9 @@ impl <T: Clone> Node<T> {
             panic!("index exceeds bounds (length {:?}, index {:?})", self.len(), index)
         }
 
-        match self {
-            &Flat { ref data } => &data[index], // we already checked the bounds
-            &Concat { left_len, ref left, ref right, .. } => {
+        match *self {
+            Flat { ref data } => &data[index], // we already checked the bounds
+            Concat { left_len, ref left, ref right, .. } => {
                 let (child, new_index) = 
                     if index < left_len {
                         (left, index)
@@ -133,6 +136,10 @@ impl <T: Clone> Rope<T> {
 
     pub fn len(&self) -> usize {
         self.root.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn concat(left: Self, right: Self) -> Self {
@@ -172,15 +179,15 @@ impl <'a, T: Clone> RopeIter<'a, T> {
         let mut stack: Vec<&'a Link<T>> = Vec::with_capacity(ptr.depth());
 
         loop {
-            match ptr.borrow() {
-                &Flat { ref data, .. } => {
+            match *ptr.borrow() {
+                Flat { ref data, .. } => {
                     return RopeIter {
                         stack: stack,
                         flat_iter: data.iter(),
                     };
                 },
 
-                &Concat { ref left, .. } => {
+                Concat { ref left, .. } => {
                     stack.push(ptr);
                     ptr = left;
                 },
@@ -212,11 +219,11 @@ impl <'a, T: Clone> Iterator for RopeIter<'a, T> {
                     // children, so go right now and drop the ref to the
                     // popped node
                     Some(rc_ref) => {
-                        if let &Concat { ref right, .. } = rc_ref.as_ref() {
+                        if let Concat { ref right, .. } = *rc_ref.as_ref() {
                             let mut current = right;
 
                             // Go left all the way to the next leaf
-                            while let &Concat { ref left, .. } = current.as_ref() {
+                            while let Concat { ref left, .. } = *current.as_ref() {
                                 self.stack.push(current);
                                 current = left;
                             }
@@ -225,7 +232,7 @@ impl <'a, T: Clone> Iterator for RopeIter<'a, T> {
                             // we finish with the recursive call so that in the
                             // event that this leaf is empty (should not happen
                             // but...) we'll continue on to the next leaf
-                            if let &Flat { ref data } = current.as_ref() {
+                            if let Flat { ref data } = *current.as_ref() {
                                 self.flat_iter = data.iter();
                                 self.next()
 
