@@ -1,7 +1,13 @@
 //!
 //! An implementation of a reference-counted persistent rope data structure.
 //! It is intended to allow (relatively) efficient storage of long sequences of
-//! values, and efficient concat/slice operations on said sequences.
+//! values, and (relatively) efficient create/read/concat/slice operations on 
+//! said sequences. Its features are motivated by the needs of a hypothetical
+//! text editor: persistence gives you easy undo functionality and allows you 
+//! to operate on the buffer concurrently e.g. saving a copy while the user
+//! continues to edit, without having to copy the entire buffer in memory.
+//! Markers allow sparse annotation of the buffer with useful information
+//! e.g. the locations of line breaks.
 //!
 //! The implementation is based on a paper called "Ropes: an Alternative to 
 //! Strings" (Boehm, Atkinson, and Plass 1995).
@@ -29,9 +35,9 @@
 //! assert_eq!(vec![1, 2, 3, 1, 2, 3, 1, 2, 3], concatted_as_vec);
 //!
 //! let concatted_sliced_as_vec: Vec<usize> = concatted.slice(2, 6)
-//!                                                         .iter()
-//!                                                         .cloned()
-//!                                                         .collect();
+//!                                                    .iter()
+//!                                                    .cloned()
+//!                                                    .collect();
 //! assert_eq!(vec![3, 1, 2, 3], concatted_sliced_as_vec);
 //!
 //! ```
