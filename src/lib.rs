@@ -1,7 +1,7 @@
 //!
 //! An implementation of a reference-counted persistent rope data structure.
 //! It is intended to allow (relatively) efficient storage of long sequences of
-//! values, and efficient concat/substring operations on said sequences.
+//! values, and efficient concat/slice operations on said sequences.
 //!
 //! The implementation is based on a paper called "Ropes: an Alternative to 
 //! Strings" (Boehm, Atkinson, and Plass 1995).
@@ -28,11 +28,11 @@
 //! let concatted_as_vec: Vec<usize> = concatted.iter().cloned().collect();
 //! assert_eq!(vec![1, 2, 3, 1, 2, 3, 1, 2, 3], concatted_as_vec);
 //!
-//! let concatted_substringed_as_vec: Vec<usize> = concatted.substring(2, 6)
+//! let concatted_sliced_as_vec: Vec<usize> = concatted.slice(2, 6)
 //!                                                         .iter()
 //!                                                         .cloned()
 //!                                                         .collect();
-//! assert_eq!(vec![3, 1, 2, 3], concatted_substringed_as_vec);
+//! assert_eq!(vec![3, 1, 2, 3], concatted_sliced_as_vec);
 //!
 //! ```
 //!
@@ -159,7 +159,7 @@ impl<T: Clone, M: Eq + Hash + Copy> Node<T, M> {
         })
     }
 
-    fn substring(&self, start: usize, end: usize) -> Rc<Self> {
+    fn slice(&self, start: usize, end: usize) -> Rc<Self> {
         match *self {
             Flat { ref data, ref markers } => {
                 // TODO: hopefully rust itself will panic on OOB indices here?
@@ -179,21 +179,21 @@ impl<T: Clone, M: Eq + Hash + Copy> Node<T, M> {
                 let do_left = start < left_len;
                 let do_right = end >= left_len;
 
-                // if the substring straddles this concat node
+                // if the slice straddles this concat node
                 if do_left && do_right {
                     let left = o_left.as_ref();
                     let right = o_right.as_ref();
 
-                    let left_sub = left.substring(start, left_len);
-                    let right_sub = right.substring(0, end - left_len);
+                    let left_sub = left.slice(start, left_len);
+                    let right_sub = right.slice(0, end - left_len);
 
                     Self::concat(&left_sub, &right_sub)
                 
-                // if we're substringing one side or the other
+                // if we're sliceing one side or the other
                 } else if do_left {
-                    o_left.as_ref().substring(start, end)
+                    o_left.as_ref().slice(start, end)
                 } else if do_right {
-                    o_right.as_ref().substring(0, end - left_len)
+                    o_right.as_ref().slice(0, end - left_len)
 
                 // do people do this? I don't know
                 } else {
@@ -272,13 +272,13 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
     }
 
     /// `start` is inclusive, `end` is EXclusive.
-    pub fn substring(&self, start: usize, end: usize) -> Self {
+    pub fn slice(&self, start: usize, end: usize) -> Self {
         if start >= end || end > self.len() {
-            panic!("bad substring indices: {}, {}", start, end);
+            panic!("bad slice indices: {}, {}", start, end);
         }
 
         Rope {
-            root: self.root.substring(start, end),
+            root: self.root.slice(start, end),
         }
     }
 

@@ -79,21 +79,21 @@ mod iteration {
 
 }
 
-mod substring {
+mod slice {
 
     use super::*;
 
     #[test]
     fn flat() {
         let base = sample_flat_rope();
-        let sub = base.substring(1, 3);
+        let sub = base.slice(1, 3);
         assert_eq!(vec![1, 2], sub.iter().cloned().collect(): Vec<usize>);
     }
 
     #[test]
     fn deep() {
         let base = sample_deep_rope();
-        let sub = base.substring(1, 5);
+        let sub = base.slice(1, 5);
         assert_eq!(vec![1, 2, 3, 4], sub.iter().cloned().collect(): Vec<usize>);
     }
 }
@@ -129,21 +129,21 @@ mod markers {
     }
 
     #[test]
-    fn substring_count() {
+    fn slice_count() {
         assert_eq!(None,
-                   flat_marked_rope().substring(0, 1).marker_counts().get(&Marker{}));
+                   flat_marked_rope().slice(0, 1).marker_counts().get(&Marker{}));
 
         assert_eq!(Some(&1),
-                   flat_marked_rope().substring(1, 3).marker_counts().get(&Marker{}));
+                   flat_marked_rope().slice(1, 3).marker_counts().get(&Marker{}));
 
         assert_eq!(None,
-                   deep_marked_rope().substring(0, 1).marker_counts().get(&Marker{}));
+                   deep_marked_rope().slice(0, 1).marker_counts().get(&Marker{}));
 
         assert_eq!(Some(&1),
-                   deep_marked_rope().substring(1, 3).marker_counts().get(&Marker{}));
+                   deep_marked_rope().slice(1, 3).marker_counts().get(&Marker{}));
 
         assert_eq!(Some(&2),
-                   deep_marked_rope().substring(1, 6).marker_counts().get(&Marker{}));
+                   deep_marked_rope().slice(1, 6).marker_counts().get(&Marker{}));
     }
 
     #[test]
