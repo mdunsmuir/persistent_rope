@@ -9,7 +9,7 @@ pub fn sample_deep_rope() -> Rope<usize> {
     let v2 = vec![3, 4, 5];
     let v3 = vec![6, 7, 8];
 
-    Rope::concat(Rope::new(v1), Rope::concat(Rope::new(v2), Rope::new(v3)))
+    Rope::concat(&Rope::new(v1), &Rope::concat(&Rope::new(v2), &Rope::new(v3)))
 }
 
 #[test]
@@ -96,4 +96,64 @@ mod substring {
         let sub = base.substring(1, 5);
         assert_eq!(vec![1, 2, 3, 4], sub.iter().cloned().collect(): Vec<usize>);
     }
+}
+
+mod markers {
+
+    use super::super::*;
+
+    #[derive(PartialEq, Eq, Hash, Clone, Copy)]
+    struct Marker {}
+
+    fn flat_marked_rope() -> Rope<usize, Marker> {
+        let vec = vec![
+            (0, None),
+            (1, Some(vec![Marker{}].into_iter().collect())),
+            (2, None)
+        ];
+
+        Rope::with_markers(vec)
+    }
+
+    fn deep_marked_rope() -> Rope<usize, Marker> {
+        let vec = vec![
+            (0, None),
+            (1, Some(vec![Marker{}].into_iter().collect())),
+            (2, None),
+            (3, Some(vec![Marker{}].into_iter().collect())),
+        ];
+
+        Rope::concat(&flat_marked_rope(),
+                     &Rope::concat(&Rope::with_markers(vec),
+                                   &flat_marked_rope()))
+    }
+
+    #[test]
+    fn substring_count() {
+        assert_eq!(None,
+                   flat_marked_rope().substring(0, 1).marker_counts().get(&Marker{}));
+
+        assert_eq!(Some(&1),
+                   flat_marked_rope().substring(1, 3).marker_counts().get(&Marker{}));
+
+        assert_eq!(None,
+                   deep_marked_rope().substring(0, 1).marker_counts().get(&Marker{}));
+
+        assert_eq!(Some(&1),
+                   deep_marked_rope().substring(1, 3).marker_counts().get(&Marker{}));
+
+        assert_eq!(Some(&2),
+                   deep_marked_rope().substring(1, 6).marker_counts().get(&Marker{}));
+    }
+
+    #[test]
+    fn flat_count() {
+        assert_eq!(Some(&1), flat_marked_rope().marker_counts().get(&Marker{}));
+    }
+
+    #[test]
+    fn deep_count() {
+        assert_eq!(Some(&4), deep_marked_rope().marker_counts().get(&Marker{}));
+    }
+
 }

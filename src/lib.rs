@@ -1,4 +1,59 @@
+//!
+//! An implementation of a reference-counted persistent rope data structure.
+//! It is intended to allow (relatively) efficient storage of long sequences of
+//! values, and efficient concat/substring operations on said sequences.
+//!
+//! The implementation is based on a paper called "Ropes: an Alternative to 
+//! Strings" (Boehm, Atkinson, and Plass 1995).
+//!
+//! # Usage
+//!
+//! Create a `Rope` by consuming a `Vec`:
+//!
+//! ```
+//! use persistent_rope::Rope;
+//! let rope: Rope<usize> = Rope::new(vec![1, 2, 3]);
+//! ```
+//!
+//! A `Rope` is immutable and operations that "change" `Rope`s actually create
+//! new "copies" of them thanks to persistence. Immutability means that
+//! can use reference-counted pointers to avoid copying the entire structure
+//! whenever we change something:
+//!
+//! ```
+//! use persistent_rope::Rope;
+//! let rope: Rope<usize> = Rope::new(vec![1, 2, 3]);
+//!
+//! let concatted = Rope::concat(&rope, &Rope::concat(&rope, &rope));
+//! let concatted_as_vec: Vec<usize> = concatted.iter().cloned().collect();
+//! assert_eq!(vec![1, 2, 3, 1, 2, 3, 1, 2, 3], concatted_as_vec);
+//!
+//! let concatted_substringed_as_vec: Vec<usize> = concatted.substring(2, 6)
+//!                                                         .iter()
+//!                                                         .cloned()
+//!                                                         .collect();
+//! assert_eq!(vec![3, 1, 2, 3], concatted_substringed_as_vec);
+//!
+//! ```
+//!
+//! ## Markers
+//!
+//! Markers (denoted by type parameter `M`) allow positions in the sequence to
+//! be stored (sparsely) to enable operations like e.g. "give me the index of
+//! the 43rd line break in my text buffer" or "how many open parenthesis
+//! characters appear in my text buffer".
+//!
+//! # Disclaimer
+//!
+//! This code is in a very rough state. I intend to finish, polish, benchmark,
+//! and optimize it, but as of now I've done none of those things and I make
+//! no guarantees about it, not even that its essential design is capable of
+//! acceptable performance.
+//!
+
 #![feature(type_ascription)]
+#![feature(collections_bound)]
+#![feature(btree_range)]
 
 #![cfg_attr(feature = "lint", feature(plugin))]
 #![cfg_attr(feature = "lint", plugin(clippy))]
@@ -13,6 +68,7 @@ use std::hash::Hash;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::BTreeMap;
+use std::collections::Bound::*;
 
 type Link<T, M> = Rc<Node<T, M>>;
 
@@ -25,6 +81,7 @@ enum Node<T, M> {
         left: Link<T, M>,
         right: Link<T, M>,
     },
+
     Flat {
         data: Vec<T>,
         markers: BTreeMap<usize, HashSet<M>>,
@@ -42,7 +99,7 @@ pub struct RopeIter<'a, T: 'a, M: 'a + Eq + Hash> {
     flat_iter: Iter<'a, T>,
 }
 
-impl<T: Clone, M: Eq + Hash> Node<T, M> {
+impl<T: Clone, M: Eq + Hash + Copy> Node<T, M> {
 
     fn depth(&self) -> usize {
         match *self {
@@ -58,12 +115,44 @@ impl<T: Clone, M: Eq + Hash> Node<T, M> {
         }
     }
 
+    fn marker_counts(&self) -> HashMap<M, usize> {
+        match *self {
+            Concat { ref markers, .. } => {
+                markers.iter()
+                       .map(|(&marker, &(_, count))| (marker, count) )
+                       .collect()
+            },
+
+            Flat { ref markers, .. } => {
+                let mut counts = HashMap::new();
+
+                for markers_at in markers.values() {
+                    for &marker in markers_at {
+                        *counts.entry(marker).or_insert(0) += 1;
+                    }
+                }
+
+                counts
+            }
+        }
+    }
+
     // TODO: Optimize for concatenating short subtrees -> Flat
     fn concat(left: &Rc<Self>, right: &Rc<Self>) -> Rc<Self> {
+        let mut counts: HashMap<M, (usize, usize)> =
+            left.marker_counts()
+                .iter()
+                .map(|(&marker, &count)| (marker, (count, count)) )
+                .collect();
+
+        for (&marker, &count) in &right.marker_counts() {
+            counts.entry(marker).or_insert((0, 0)).1 += count;
+        }
+
         Rc::new(Concat {
             depth: max(left.depth(), right.depth()),
             left_len: left.len(),
-            markers: HashMap::new(),
+            markers: counts,
             len: left.len() + right.len(),
             left: left.clone(),
             right: right.clone(),
@@ -72,11 +161,18 @@ impl<T: Clone, M: Eq + Hash> Node<T, M> {
 
     fn substring(&self, start: usize, end: usize) -> Rc<Self> {
         match *self {
-            Flat { ref data, .. } => {
+            Flat { ref data, ref markers } => {
                 // TODO: hopefully rust itself will panic on OOB indices here?
                 let mut slice = Vec::with_capacity(end - start);
                 slice.extend_from_slice(&data[start..end]);
-                Rc::new(Flat { data: slice, markers: BTreeMap::new() })
+
+                let sliced_markers =
+                    markers.range(Included(&start),
+                                  Excluded(&end))
+                           .map(|(&index, set)| (index, set.clone()))
+                           .collect();
+
+                Rc::new(Flat { data: slice, markers: sliced_markers })
             },
 
             Concat { left_len, left: ref o_left, right: ref o_right, .. } => {
@@ -129,12 +225,32 @@ impl<T: Clone, M: Eq + Hash> Node<T, M> {
 
 }
 
-impl<T: Clone, M: Eq + Hash> Rope<T, M> {
+impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
 
     pub fn new(data: Vec<T>) -> Self {
         Rope {
             root: Rc::new( Flat { data: data, markers: BTreeMap::new() } ),
         }
+    }
+
+    pub fn with_markers(data: Vec<(T, Option<HashSet<M>>)>) -> Self {
+        let mut marker_map = BTreeMap::new();
+
+        let values = data.into_iter()
+                         .enumerate()
+                         .map(|(i, (value, o_markers))| {
+
+            if let Some(markers) = o_markers {
+                marker_map.insert(i, markers);
+            }
+
+            value
+        }).collect();
+
+        Rope { root: Rc::new(Flat {
+            data: values,
+            markers: marker_map,
+        })}
     }
 
     pub fn len(&self) -> usize {
@@ -145,7 +261,11 @@ impl<T: Clone, M: Eq + Hash> Rope<T, M> {
         self.len() == 0
     }
 
-    pub fn concat(left: Self, right: Self) -> Self {
+    pub fn marker_counts(&self) -> HashMap<M, usize> {
+        self.root.marker_counts()
+    }
+
+    pub fn concat(left: &Self, right: &Self) -> Self {
         Rope {
             root: Node::concat(&left.root, &right.root),
         }
@@ -168,7 +288,7 @@ impl<T: Clone, M: Eq + Hash> Rope<T, M> {
 
 }
 
-impl<T: Clone, M: Eq + Hash> Index<usize> for Rope<T, M> {
+impl<T: Clone, M: Eq + Hash + Copy> Index<usize> for Rope<T, M> {
 
     type Output = T;
 
@@ -177,7 +297,7 @@ impl<T: Clone, M: Eq + Hash> Index<usize> for Rope<T, M> {
     }
 }
 
-impl<'a, T: Clone, M: Eq + Hash> RopeIter<'a, T, M> {
+impl<'a, T: Clone, M: Eq + Hash + Copy> RopeIter<'a, T, M> {
 
     fn new(mut ptr: &'a Link<T, M>) -> Self {
         let mut stack: Vec<&'a Link<T, M>> = Vec::with_capacity(ptr.depth());
@@ -200,7 +320,7 @@ impl<'a, T: Clone, M: Eq + Hash> RopeIter<'a, T, M> {
     }
 }
 
-impl<'a, T: Clone, M: Eq + Hash> Iterator for RopeIter<'a, T, M> {
+impl<'a, T: Clone, M: Eq + Hash + Copy> Iterator for RopeIter<'a, T, M> {
 
     type Item = &'a T;
 
@@ -251,6 +371,16 @@ impl<'a, T: Clone, M: Eq + Hash> Iterator for RopeIter<'a, T, M> {
                 } // match stack pop
             }
         } // match current iter next
+    }
+}
+
+impl<'a, T: Clone, M: Eq + Hash + Copy> IntoIterator for &'a Rope<T, M> {
+
+    type Item = &'a T;
+    type IntoIter = RopeIter<'a, T, M>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
