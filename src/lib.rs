@@ -295,27 +295,6 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
         })}
     }
 
-    /// TODO: Lazy implementation, terrible performance, needs rewrite.
-    pub fn with_markers(data: Vec<(T, Option<HashSet<M>>)>) -> Self {
-        let mut marker_map = BTreeMap::new();
-
-        let values = data.into_iter()
-                         .enumerate()
-                         .map(|(i, (value, o_markers))| {
-
-            if let Some(markers) = o_markers {
-                marker_map.insert(i, markers);
-            }
-
-            value
-        }).collect();
-
-        Rope { root: Rc::new(Flat {
-            data: values,
-            markers: marker_map,
-        })}
-    }
-
     pub fn from_chunk(chunk: Chunk<T, M>) -> Self {
         Rope { root: Rc::new(Flat {
             data: chunk.data,
@@ -323,7 +302,7 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
         })}
     }
 
-    pub fn generic_load_2<F, E>(chunk_size: usize,
+    pub fn generic_load<F, E>(chunk_size: usize,
                                 mut loader: F) -> Result<Self, E>
         where F: FnMut(Chunk<T, M>) -> Result<Option<Chunk<T, M>>, E> {
 
@@ -341,65 +320,6 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
                 Ok(Some(loaded_chunk)) =>
                     qa.push_back(Self::from_chunk(loaded_chunk)),
             }
-        }
-
-        while qa.len() > 1 {
-            qt = qa;
-            qa = qb;
-            qb = qt;
-
-            while let Some(left) = qb.pop_front() {
-                if let Some(right) = qb.pop_front() {
-                    qa.push_back(Rope::concat(&left, &right));
-                } else {
-                    qa.push_back(left);
-                }
-            }
-        }
-
-        if let Some(root) = qa.pop_front() {
-            Ok(root)
-        } else {
-            panic!("should not get here!")
-        }
-    }
-
-    /// This provides generic access to a procedure for loading a sequence
-    /// of values and sparse markers into the `Rope` that will become the first
-    /// version of our `Buffer`. It uses a closure rather than taking e.g. an
-    /// `Iterator` directly so that clients can deal with specific iterator
-    /// behavior and marker insertion all in one place.
-    ///
-    /// TODO: Lazy implementation, terrible performance, needs rewrite.
-    pub fn generic_load<F, E>(mut next: F,
-                              chunk_size: usize) -> Result<Self, E>
-        where F: FnMut() -> Result<Option<(T, Option<HashSet<M>>)>, E> {
-
-        let mut qa: VecDeque<Rope<T, M>> = VecDeque::new();
-        let mut qb: VecDeque<Rope<T, M>> = VecDeque::new();
-        let mut qt: VecDeque<Rope<T, M>>;
-
-        let mut i = 0;
-        'outer: loop {
-            let mut this_chunk = Vec::with_capacity(chunk_size);
-
-            while i < chunk_size {
-                match next() {
-                    Err(e) => return Err(e),
-                    Ok(o) => match o {
-                        None => {
-                            qa.push_back(Rope::with_markers(this_chunk));
-                            break 'outer;
-                        },
-                        Some(s) => this_chunk.push(s),
-                    }
-                }
-
-                i += 1;
-            }
-
-            qa.push_back(Rope::with_markers(this_chunk));
-            i = 0;
         }
 
         while qa.len() > 1 {
