@@ -14,11 +14,11 @@
 //!
 //! # Usage
 //!
-//! Create a `Rope` by consuming a `Vec`:
+//! Create a flat `Rope` from a slice:
 //!
 //! ```
 //! use persistent_rope::Rope;
-//! let rope: Rope<usize> = Rope::new(vec![1, 2, 3]);
+//! let rope: Rope<usize> = Rope::new(&vec![1, 2, 3]);
 //! ```
 //!
 //! A `Rope` is immutable and operations that "change" `Rope`s actually create
@@ -28,7 +28,7 @@
 //!
 //! ```
 //! use persistent_rope::Rope;
-//! let rope: Rope<usize> = Rope::new(vec![1, 2, 3]);
+//! let rope: Rope<usize> = Rope::new(&vec![1, 2, 3]);
 //!
 //! let concatted = Rope::concat(&rope, &Rope::concat(&rope, &rope));
 //! let concatted_as_vec: Vec<usize> = concatted.iter().cloned().collect();
@@ -48,6 +48,12 @@
 //! be stored (sparsely) to enable operations like e.g. "give me the index of
 //! the 43rd line break in my text buffer" or "how many open parenthesis
 //! characters appear in my text buffer".
+//!
+//! # TODO
+//!
+//! * The implementation of loading with markers is painfully, ridiculously
+//!   slow. It works for now, but it needs a complete rewrite using fewer
+//!   intermediate structures before this library is ready for prime time.
 //!
 //! # Disclaimer
 //!
@@ -71,6 +77,7 @@ use std::rc::*;
 use std::cmp::{max};
 
 use std::hash::Hash;
+use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::BTreeMap;
@@ -100,7 +107,7 @@ pub struct Rope<T, M = ()> {
     root: Link<T, M>,
 }
 
-pub struct RopeIter<'a, T: 'a, M: 'a + Eq + Hash> {
+pub struct Values<'a, T: 'a, M: 'a + Eq + Hash> {
     stack: Vec<&'a Link<T, M>>,
     flat_iter: Iter<'a, T>,
 }
@@ -156,7 +163,7 @@ impl<T: Clone, M: Eq + Hash + Copy> Node<T, M> {
         }
 
         Rc::new(Concat {
-            depth: max(left.depth(), right.depth()),
+            depth: max(left.depth(), right.depth()) + 1,
             left_len: left.len(),
             markers: counts,
             len: left.len() + right.len(),
@@ -233,12 +240,17 @@ impl<T: Clone, M: Eq + Hash + Copy> Node<T, M> {
 
 impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
 
-    pub fn new(data: Vec<T>) -> Self {
-        Rope {
-            root: Rc::new( Flat { data: data, markers: BTreeMap::new() } ),
-        }
+    pub fn new(data: &[T]) -> Self {
+        let mut data_vec = Vec::with_capacity(data.len());
+        data_vec.extend_from_slice(&data);
+
+        Rope { root: Rc::new( Flat {
+            data: data_vec,
+            markers: BTreeMap::new(),
+        })}
     }
 
+    /// TODO: Lazy implementation, terrible performance, needs rewrite.
     pub fn with_markers(data: Vec<(T, Option<HashSet<M>>)>) -> Self {
         let mut marker_map = BTreeMap::new();
 
@@ -259,6 +271,65 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
         })}
     }
 
+    /// This provides generic access to a procedure for loading a sequence
+    /// of values and sparse markers into the `Rope` that will become the first
+    /// version of our `Buffer`. It uses a closure rather than taking e.g. an
+    /// `Iterator` directly so that clients can deal with specific iterator
+    /// behavior and marker insertion all in one place.
+    ///
+    /// TODO: Lazy implementation, terrible performance, needs rewrite.
+    pub fn generic_load<F, E>(mut next: F,
+                              chunk_size: usize) -> Result<Self, E>
+        where F: FnMut() -> Result<Option<(T, Option<HashSet<M>>)>, E> {
+
+        let mut qa: VecDeque<Rope<T, M>> = VecDeque::new();
+        let mut qb: VecDeque<Rope<T, M>> = VecDeque::new();
+        let mut qt: VecDeque<Rope<T, M>>;
+
+        let mut i = 0;
+        'outer: loop {
+            let mut this_chunk = Vec::with_capacity(chunk_size);
+
+            while i < chunk_size {
+                match next() {
+                    Err(e) => return Err(e),
+                    Ok(o) => match o {
+                        None => {
+                            qa.push_back(Rope::with_markers(this_chunk));
+                            break 'outer;
+                        },
+                        Some(s) => this_chunk.push(s),
+                    }
+                }
+
+                i += 1;
+            }
+
+            qa.push_back(Rope::with_markers(this_chunk));
+            i = 0;
+        }
+
+        while qa.len() > 1 {
+            qt = qa;
+            qa = qb;
+            qb = qt;
+
+            while let Some(left) = qb.pop_front() {
+                if let Some(right) = qb.pop_front() {
+                    qa.push_back(Rope::concat(&left, &right));
+                } else {
+                    qa.push_back(left);
+                }
+            }
+        }
+
+        if let Some(root) = qa.pop_front() {
+            Ok(root)
+        } else {
+            panic!("should not get here!")
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.root.len()
     }
@@ -267,8 +338,19 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
         self.len() == 0
     }
 
+    pub fn depth(&self) -> usize {
+        self.root.depth()
+    }
+
     pub fn marker_counts(&self) -> HashMap<M, usize> {
         self.root.marker_counts()
+    }
+
+    pub fn marker_count(&self, marker: M) -> usize {
+        match self.marker_counts().get(&marker) {
+            None => 0,
+            Some(&n) => n,
+        }
     }
 
     pub fn concat(left: &Self, right: &Self) -> Self {
@@ -288,8 +370,8 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
         }
     }
 
-    pub fn iter(&self) -> RopeIter<T, M> {
-        RopeIter::new(&self.root)
+    pub fn iter(&self) -> Values<T, M> {
+        Values::new(&self.root)
     }
 
 }
@@ -303,7 +385,7 @@ impl<T: Clone, M: Eq + Hash + Copy> Index<usize> for Rope<T, M> {
     }
 }
 
-impl<'a, T: Clone, M: Eq + Hash + Copy> RopeIter<'a, T, M> {
+impl<'a, T: Clone, M: Eq + Hash + Copy> Values<'a, T, M> {
 
     fn new(mut ptr: &'a Link<T, M>) -> Self {
         let mut stack: Vec<&'a Link<T, M>> = Vec::with_capacity(ptr.depth());
@@ -311,7 +393,7 @@ impl<'a, T: Clone, M: Eq + Hash + Copy> RopeIter<'a, T, M> {
         loop {
             match *ptr.borrow() {
                 Flat { ref data, .. } => {
-                    return RopeIter {
+                    return Values {
                         stack: stack,
                         flat_iter: data.iter(),
                     };
@@ -326,7 +408,7 @@ impl<'a, T: Clone, M: Eq + Hash + Copy> RopeIter<'a, T, M> {
     }
 }
 
-impl<'a, T: Clone, M: Eq + Hash + Copy> Iterator for RopeIter<'a, T, M> {
+impl<'a, T: Clone, M: Eq + Hash + Copy> Iterator for Values<'a, T, M> {
 
     type Item = &'a T;
 
@@ -383,7 +465,7 @@ impl<'a, T: Clone, M: Eq + Hash + Copy> Iterator for RopeIter<'a, T, M> {
 impl<'a, T: Clone, M: Eq + Hash + Copy> IntoIterator for &'a Rope<T, M> {
 
     type Item = &'a T;
-    type IntoIter = RopeIter<'a, T, M>;
+    type IntoIter = Values<'a, T, M>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()

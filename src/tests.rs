@@ -1,20 +1,20 @@
 use super::*;
 
 pub fn sample_flat_rope() -> Rope<usize> {
-    Rope::new(vec![0, 1, 2])
+    Rope::new(&vec![0, 1, 2])
 }
 
 pub fn sample_deep_rope() -> Rope<usize> {
-    let v1 = vec![0, 1, 2];
-    let v2 = vec![3, 4, 5];
-    let v3 = vec![6, 7, 8];
+    let v1 = &vec![0, 1, 2];
+    let v2 = &vec![3, 4, 5];
+    let v3 = &vec![6, 7, 8];
 
     Rope::concat(&Rope::new(v1), &Rope::concat(&Rope::new(v2), &Rope::new(v3)))
 }
 
 #[test]
 fn length() {
-    let empty_rope: Rope<usize> = Rope::new(Vec::new(): Vec<usize>);
+    let empty_rope: Rope<usize> = Rope::new(&(Vec::new(): Vec<usize>));
     assert_eq!(0, empty_rope.len());
     assert!(empty_rope.is_empty());
 
