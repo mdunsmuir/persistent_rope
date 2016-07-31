@@ -51,9 +51,9 @@
 //!
 //! # TODO
 //!
-//! * The implementation of loading with markers is painfully, ridiculously
-//!   slow. It works for now, but it needs a complete rewrite using fewer
-//!   intermediate structures before this library is ready for prime time.
+//! * Loading data could still be more space and time efficient, possibly
+//!   with the addition of lazy-loading nodes or nodes that point into a
+//!   shared slice.
 //!
 //! # Disclaimer
 //!
