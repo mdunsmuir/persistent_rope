@@ -73,7 +73,6 @@
 use std::slice::Iter;
 use std::borrow::Borrow;
 use std::ops::Index;
-use std::ops::{Deref, DerefMut};
 use std::rc::*;
 use std::cmp::{max};
 
@@ -124,6 +123,10 @@ pub struct Chunk<T, M> {
 impl<T: Clone, M: Eq + Hash + Copy> Chunk<T, M> {
 
     fn new(size: usize) -> Self {
+        if size < 1 {
+            panic!("cannot create new chunk with size < 1");
+        }
+
         Chunk {
             data: Vec::with_capacity(size),
             markers: BTreeMap::new(),
@@ -131,7 +134,19 @@ impl<T: Clone, M: Eq + Hash + Copy> Chunk<T, M> {
         }
     }
 
-    fn mark_at(&mut self, marker: M, at: usize) {
+    pub fn capacity(&self) -> usize {
+        self.size
+    }
+
+    pub fn push(&mut self, value: T) {
+        if self.data.len() == self.data.capacity() {
+            panic!("attempted to add data to a full Chunk!");
+        }
+
+        self.data.push(value);
+    }
+
+    pub fn mark_at(&mut self, marker: M, at: usize) {
         if at >= self.data.len() {
             panic!("attempted to mark outside data range");
         } else {
@@ -139,22 +154,6 @@ impl<T: Clone, M: Eq + Hash + Copy> Chunk<T, M> {
                         .or_insert(HashSet::new())
                         .insert(marker);
         }
-    }
-}
-
-impl<T: Clone, M: Eq + Hash + Copy> Deref for Chunk<T, M> {
-
-    type Target = Vec<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.data
-    }
-}
-
-impl<T: Clone, M: Eq + Hash + Copy> DerefMut for Chunk<T, M> {
-
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
     }
 }
 
@@ -326,40 +325,22 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
 
     pub fn generic_load_2<F, E>(chunk_size: usize,
                                 mut loader: F) -> Result<Self, E>
-        where F: FnMut(Chunk<T, M>) -> Result<Chunk<T, M>, E> {
+        where F: FnMut(Chunk<T, M>) -> Result<Option<Chunk<T, M>>, E> {
 
 
         let mut qa: VecDeque<Rope<T, M>> = VecDeque::new();
         let mut qb: VecDeque<Rope<T, M>> = VecDeque::new();
         let mut qt: VecDeque<Rope<T, M>>;
 
-        let mut i = 0;
         'outer: loop {
             let chunk = Chunk::new(chunk_size);
-            qa.push_back(match loader(chunk) {
+
+            match loader(chunk) {
                 Err(e) => return Err(e),
-                Ok(chunk) => Ok(Self::from_chunk(chunk)),
-            });
-
-            let mut this_chunk = Vec::with_capacity(chunk_size);
-
-            while i < chunk_size {
-                match next() {
-                    Err(e) => return Err(e),
-                    Ok(o) => match o {
-                        None => {
-                            qa.push_back(Rope::with_markers(this_chunk));
-                            break 'outer;
-                        },
-                        Some(s) => this_chunk.push(s),
-                    }
-                }
-
-                i += 1;
+                Ok(None) => break 'outer,
+                Ok(Some(loaded_chunk)) =>
+                    qa.push_back(Self::from_chunk(loaded_chunk)),
             }
-
-            qa.push_back(Rope::with_markers(this_chunk));
-            i = 0;
         }
 
         while qa.len() > 1 {
