@@ -117,33 +117,23 @@ pub struct Values<'a, T: 'a, M: 'a + Eq + Hash> {
 pub struct Chunk<T, M> {
     data: Vec<T>,
     markers: Markers<M>,
-    size: usize,
 }
 
 impl<T: Clone, M: Eq + Hash + Copy> Chunk<T, M> {
 
-    fn new(size: usize) -> Self {
-        if size < 1 {
-            panic!("cannot create new chunk with size < 1");
-        }
-
+    pub fn with_capacity(capacity: usize) -> Self {
         Chunk {
-            data: Vec::with_capacity(size),
+            data: Vec::with_capacity(capacity),
             markers: BTreeMap::new(),
-            size: size,
         }
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.size
     }
 
     pub fn push(&mut self, value: T) {
-        if self.data.len() == self.data.capacity() {
-            panic!("attempted to add data to a full Chunk!");
-        }
-
         self.data.push(value);
+    }
+
+    pub fn extend_from_slice(&mut self, slice: &[T]) {
+        self.data.extend_from_slice(slice);
     }
 
     pub fn mark_at(&mut self, marker: M, at: usize) {
@@ -302,23 +292,37 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
         })}
     }
 
-    pub fn generic_load<F, E>(chunk_size: usize,
-                                mut loader: F) -> Result<Self, E>
-        where F: FnMut(Chunk<T, M>) -> Result<Option<Chunk<T, M>>, E> {
-
+    /// The nodes in the rope are all immutable, so creating a new rope is
+    /// most efficient if we create all the leaf nodes first so we don't
+    /// have to do any traversal and reallocation.
+    ///
+    /// The closure supplied to this method is expected to return
+    /// `Ok(Some(chunk))` some number of times, terminating the loading
+    /// procedure either by returning `Ok(None)`, which indicates end of input
+    /// and triggers the assembly of the rope, or `Err(some_error)` which
+    /// indicates e.g. an IO or decoding error. In the latter case, that error
+    /// is returned from this method call as `Err(some_error)`.
+    ///
+    /// We don't put any restrictions on the size of chunks, but clients are
+    /// encouraged to use the `Chunk::with_capacity(capacity)` initializer,
+    /// where `capacity` is the maximum number of items expected per-chunk,
+    /// to avoid continuous reallocations.
+    ///
+    /// TODO: This implementation is super cheesy and could be rewritten to
+    /// definitely save on memory and probably time as well.
+    pub fn from_chunks<F, E>(mut loader: F) -> Result<Self, E>
+        where F: FnMut() -> Result<Option<Chunk<T, M>>, E> {
 
         let mut qa: VecDeque<Rope<T, M>> = VecDeque::new();
         let mut qb: VecDeque<Rope<T, M>> = VecDeque::new();
         let mut qt: VecDeque<Rope<T, M>>;
 
         'outer: loop {
-            let chunk = Chunk::new(chunk_size);
-
-            match loader(chunk) {
+            match loader() {
                 Err(e) => return Err(e),
                 Ok(None) => break 'outer,
-                Ok(Some(loaded_chunk)) =>
-                    qa.push_back(Self::from_chunk(loaded_chunk)),
+                Ok(Some(chunk)) =>
+                    qa.push_back(Self::from_chunk(chunk)),
             }
         }
 
