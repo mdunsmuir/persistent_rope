@@ -77,7 +77,6 @@ use std::rc::*;
 use std::cmp::{max};
 
 use std::hash::Hash;
-use std::collections::VecDeque;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::BTreeMap;
@@ -307,44 +306,36 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
     /// encouraged to use the `Chunk::with_capacity(capacity)` initializer,
     /// where `capacity` is the maximum number of items expected per-chunk,
     /// to avoid continuous reallocations.
-    ///
-    /// TODO: This implementation is super cheesy and could be rewritten to
-    /// definitely save on memory and probably time as well.
     pub fn from_chunks<F, E>(mut loader: F) -> Result<Self, E>
         where F: FnMut() -> Result<Option<Chunk<T, M>>, E> {
 
-        let mut qa: VecDeque<Rope<T, M>> = VecDeque::new();
-        let mut qb: VecDeque<Rope<T, M>> = VecDeque::new();
-        let mut qt: VecDeque<Rope<T, M>>;
+        let mut stack = Vec::new();
 
         'outer: loop {
             match loader() {
                 Err(e) => return Err(e),
                 Ok(None) => break 'outer,
-                Ok(Some(chunk)) =>
-                    qa.push_back(Self::from_chunk(chunk)),
+
+                Ok(Some(chunk)) => {
+                    stack.push(Self::from_chunk(chunk));
+
+                    while stack.len() > 1 &&
+                        stack[stack.len() - 1].depth() == stack[stack.len() - 2].depth() {
+
+                        let right = stack.pop().unwrap();
+                        let left = stack.pop().unwrap();
+                        stack.push(Self::concat(&left, &right));
+                    }
+                } // end match OK
             }
-        }
+        } // end 'outer
 
-        while qa.len() > 1 {
-            qt = qa;
-            qa = qb;
-            qb = qt;
+        let init = stack.pop().unwrap();
+        let rope = stack.into_iter()
+                        .rev()
+                        .fold(init, |right, left| Rope::concat(&left, &right));
 
-            while let Some(left) = qb.pop_front() {
-                if let Some(right) = qb.pop_front() {
-                    qa.push_back(Rope::concat(&left, &right));
-                } else {
-                    qa.push_back(left);
-                }
-            }
-        }
-
-        if let Some(root) = qa.pop_front() {
-            Ok(root)
-        } else {
-            panic!("should not get here!")
-        }
+        Ok(rope)
     }
 
     pub fn len(&self) -> usize {
