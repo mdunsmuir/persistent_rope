@@ -63,10 +63,6 @@
 //! acceptable performance.
 //!
 
-#![feature(type_ascription)]
-#![feature(collections_bound)]
-#![feature(btree_range)]
-
 #![cfg_attr(feature = "lint", feature(plugin))]
 #![cfg_attr(feature = "lint", plugin(clippy))]
 
@@ -78,12 +74,11 @@ use std::cmp::{max};
 
 use std::hash::Hash;
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::BTreeMap;
-use std::collections::Bound::*;
+use std::collections::BTreeSet;
 
 type Link<T, M> = Rc<Node<T, M>>;
-type Markers<M> = BTreeMap<usize, HashSet<M>>;
+//type Markers<M> = BTreeMap<usize, HashSet<M>>;
+type Markers<M> = HashMap<M, BTreeSet<usize>>;
 
 enum Node<T, M> {
     Concat {
@@ -123,7 +118,7 @@ impl<T: Clone, M: Eq + Hash + Copy> Chunk<T, M> {
     pub fn with_capacity(capacity: usize) -> Self {
         Chunk {
             data: Vec::with_capacity(capacity),
-            markers: BTreeMap::new(),
+            markers: HashMap::new(),
         }
     }
 
@@ -139,9 +134,9 @@ impl<T: Clone, M: Eq + Hash + Copy> Chunk<T, M> {
         if at >= self.data.len() {
             panic!("attempted to mark outside data range");
         } else {
-            self.markers.entry(at)
-                        .or_insert(HashSet::new())
-                        .insert(marker);
+            self.markers.entry(marker)
+                        .or_insert(BTreeSet::new())
+                        .insert(at);
         }
     }
 }
@@ -173,9 +168,9 @@ impl<T: Clone, M: Eq + Hash + Copy> Node<T, M> {
             Flat { ref markers, .. } => {
                 let mut counts = HashMap::new();
 
-                for markers_at in markers.values() {
-                    for &marker in markers_at {
-                        *counts.entry(marker).or_insert(0) += 1;
+                for (marker, marker_indices) in markers.iter() {
+                    for _ in marker_indices {
+                        *counts.entry(*marker).or_insert(0) += 1;
                     }
                 }
 
@@ -213,13 +208,21 @@ impl<T: Clone, M: Eq + Hash + Copy> Node<T, M> {
                 let mut slice = Vec::with_capacity(end - start);
                 slice.extend_from_slice(&data[start..end]);
 
-                let sliced_markers =
-                    markers.range(Included(&start),
-                                  Excluded(&end))
-                           .map(|(&index, set)| (index, set.clone()))
-                           .collect();
+                let mut new_markers = HashMap::new();
 
-                Rc::new(Flat { data: slice, markers: sliced_markers })
+                for (&marker, ref indices) in markers.iter() {
+                    let sliced_markers: BTreeSet<usize> =
+                        indices.iter()
+                               .cloned()
+                               .filter(|&i| i >= start && i < end)
+                               .collect();
+
+                    if !sliced_markers.is_empty() {
+                        new_markers.insert(marker, sliced_markers);
+                    }
+                }
+
+                Rc::new(Flat { data: slice, markers: new_markers })
             },
 
             Concat { left_len, left: ref o_left, right: ref o_right, .. } => {
@@ -270,6 +273,36 @@ impl<T: Clone, M: Eq + Hash + Copy> Node<T, M> {
         }
     }
 
+    /// Find the index in the rope which has been marked with the `n`th
+    /// instance of `marker`. Useful for e.g. finding the index of the `n`th
+    /// newline.
+    fn index_for_nth_marker(&self, marker: M, n: usize) -> Option<usize> {
+        match *self {
+            Flat { ref markers, .. } => {
+                match markers.get(&marker) {
+                    None => None,
+                    Some(indices) => indices.iter().nth(n).map(|&i| i)
+                }
+            },
+
+            Concat { ref markers, ref left, ref right, left_len, .. } => {
+                match markers.get(&marker) {
+                    None => None,
+                    Some(&(left_count, count)) => {
+                        if n < left_count {
+                            left.index_for_nth_marker(marker, n)
+                        } else if n < count {
+                            right.index_for_nth_marker(marker, n - left_count)
+                                 .map(|i| left_len + i)
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
@@ -280,7 +313,7 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
 
         Rope { root: Rc::new( Flat {
             data: data_vec,
-            markers: BTreeMap::new(),
+            markers: HashMap::new(),
         })}
     }
 
@@ -376,6 +409,10 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
         Rope {
             root: self.root.slice(start, end),
         }
+    }
+
+    pub fn index_for_nth_marker(&self, marker: M, n: usize) -> Option<usize> {
+        self.root.index_for_nth_marker(marker, n)
     }
 
     pub fn iter(&self) -> Values<T, M> {

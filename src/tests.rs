@@ -106,26 +106,38 @@ mod markers {
     struct Marker {}
 
     fn flat_marked_rope() -> Rope<usize, Marker> {
-        let vec = vec![
-            (0, None),
-            (1, Some(vec![Marker{}].into_iter().collect())),
-            (2, None)
-        ];
-
-        Rope::with_markers(vec)
+        let mut chunk = Chunk::with_capacity(3);
+        chunk.extend_from_slice(&vec![0, 1, 2]);
+        chunk.mark_at(Marker {}, 1);
+        Rope::from_chunk(chunk)
     }
 
     fn deep_marked_rope() -> Rope<usize, Marker> {
-        let vec = vec![
-            (0, None),
-            (1, Some(vec![Marker{}].into_iter().collect())),
-            (2, None),
-            (3, Some(vec![Marker{}].into_iter().collect())),
-        ];
+        let mut chunk = Chunk::with_capacity(3);
+        chunk.extend_from_slice(&vec![0, 1, 2, 3]);
+        chunk.mark_at(Marker {}, 1);
+        chunk.mark_at(Marker {}, 3);
+        let rope = Rope::from_chunk(chunk);
 
         Rope::concat(&flat_marked_rope(),
-                     &Rope::concat(&Rope::with_markers(vec),
-                                   &flat_marked_rope()))
+                     &Rope::concat(&rope, &flat_marked_rope()))
+    }
+
+    #[test]
+    fn flat_indices() {
+        assert_eq!(Some(1), flat_marked_rope().index_for_nth_marker(Marker {}, 0));
+        assert_eq!(None, flat_marked_rope().index_for_nth_marker(Marker {}, 1));
+        assert_eq!(None, flat_marked_rope().index_for_nth_marker(Marker {}, 25));
+    }
+
+    #[test]
+    fn deep_indices() {
+        assert_eq!(Some(1), deep_marked_rope().index_for_nth_marker(Marker {}, 0));
+        assert_eq!(Some(4), deep_marked_rope().index_for_nth_marker(Marker {}, 1));
+        assert_eq!(Some(6), deep_marked_rope().index_for_nth_marker(Marker {}, 2));
+        assert_eq!(Some(8), deep_marked_rope().index_for_nth_marker(Marker {}, 3));
+        assert_eq!(None, deep_marked_rope().index_for_nth_marker(Marker {}, 4));
+        assert_eq!(None, deep_marked_rope().index_for_nth_marker(Marker {}, 25));
     }
 
     #[test]
@@ -155,5 +167,4 @@ mod markers {
     fn deep_count() {
         assert_eq!(Some(&4), deep_marked_rope().marker_counts().get(&Marker{}));
     }
-
 }
