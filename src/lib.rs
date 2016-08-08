@@ -70,14 +70,15 @@ use std::slice::Iter;
 use std::borrow::Borrow;
 use std::ops::Index;
 use std::rc::*;
-use std::cmp::{max};
+use std::cmp::{Ordering, max};
 
 use std::hash::Hash;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::BTreeSet;
+use std::collections::BinaryHeap;
 
 type Link<T, M> = Rc<Node<T, M>>;
-//type Markers<M> = BTreeMap<usize, HashSet<M>>;
 type Markers<M> = HashMap<M, BTreeSet<usize>>;
 
 enum Node<T, M> {
@@ -102,9 +103,56 @@ pub struct Rope<T, M = ()> {
     root: Link<T, M>,
 }
 
-pub struct Values<'a, T: 'a, M: 'a + Eq + Hash> {
+pub struct Values<'a, T: 'a, M: 'a> {
     stack: Vec<&'a Link<T, M>>,
     flat_iter: Iter<'a, T>,
+}
+
+enum CursorStackLink<'a, T: 'a, M: 'a> {
+    Left(&'a Link<T, M>),
+    Right(&'a Link<T, M>),
+}
+
+macro_rules! cursor_marker {
+    ( $t:ident; $( $f:ident ),* ) => {
+
+        #[derive(PartialEq, Eq, Clone, Copy)]
+        struct $t<M> {
+            index: usize,
+            marker: M,
+        }
+
+        impl<M: PartialEq> PartialOrd<$t<M>> for $t<M> {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                let mut result = self.index.partial_cmp(&other.index);
+                $(
+                    result = result.map(|ord| ord.$f());
+                 )*
+                result
+            }
+        }
+
+        impl<M: Eq> Ord for $t<M> {
+            fn cmp(&self, other: &Self) -> Ordering {
+                self.partial_cmp(other).unwrap()
+            }
+        }
+    };
+
+    ( $t:ident ) => { cursor_marker!($t;); };
+}
+
+cursor_marker!(CursorLeftMarker);
+cursor_marker!(CursorRightMarker; reverse);
+
+pub struct Cursor<'a, T: 'a, M: 'a> {
+    total_len: usize,
+    stack: Vec<CursorStackLink<'a, T, M>>,
+    current: &'a Link<T, M>,
+    data_index: usize,
+    markers_at: HashSet<M>,
+    left_markers: BinaryHeap<CursorLeftMarker<M>>,
+    right_markers: BinaryHeap<CursorRightMarker<M>>,
 }
 
 /// Used in the creation of new `Rope`s
@@ -419,6 +467,10 @@ impl<T: Clone, M: Eq + Hash + Copy> Rope<T, M> {
         Values::new(&self.root)
     }
 
+    pub fn cursor(&self, index: usize) -> Cursor<T, M> {
+        Cursor::new(index, &self.root)
+    }
+
 }
 
 impl<T: Clone, M: Eq + Hash + Copy> Index<usize> for Rope<T, M> {
@@ -428,6 +480,146 @@ impl<T: Clone, M: Eq + Hash + Copy> Index<usize> for Rope<T, M> {
     fn index(&self, index: usize) -> &Self::Output {
         self.root.at(index)
     }
+}
+
+macro_rules! traversal {
+    ( $node_forward:ident, $node_backward:ident,
+      $stack_forward:path, $stack_backward:path,
+      $heap_forward:ident, $heap_index_marker_forward:ident,
+      $heap_backward:ident, $heap_index_marker_backward:ident,
+      $index_modifier:expr, $fn_name:ident ) => { 
+
+        fn $fn_name(&mut self) -> Option<(&T, &HashSet<M>)> {
+            if self.data_index > 0 && self.data_index < self.data().len() {
+                let old_index = self.data_index;
+                self.data_index = $index_modifier(self.data_index);
+
+                for marker in self.markers_at.drain() {
+                    self.$heap_backward.push($heap_index_marker_backward {
+                        index: old_index,
+                        marker: marker,
+                    })
+                }
+                
+                while !self.$heap_forward.is_empty() &&
+                    self.$heap_forward.peek().unwrap().index == self.data_index {
+
+                    let $heap_index_marker_forward { marker, .. } =
+                        self.$heap_forward.pop().unwrap();
+
+                    self.markers_at.insert(marker);
+                }
+
+                Some((&self.data()[self.data_index], &self.markers_at))
+
+            } else {
+                while let Some(&$node_forward(ptr) = self.stack.last() {
+                    self.current = ptr;
+                    self.stack.pop()
+                }
+
+                if self.stack.is_empty() {
+
+                }
+
+                match *self.stack.pop().unwrap().borrow() {
+                    $
+                }
+            }
+        }
+    };
+}
+
+impl<'a, T: Clone, M: Eq + Hash + Copy> Cursor<'a, T, M> {
+
+    fn data(&self) -> &Vec<T> {
+        if let Flat { ref data, .. } = *self.current.borrow() {
+            data
+        } else {
+            panic!("cannot call data() on non-Flat")
+        }
+    }
+
+    fn finalize(&mut self) {
+        let markers =
+            if let Flat { ref markers, .. } = *self.current.borrow() {
+                markers
+            } else {
+                panic!("can only finalize on Flat")
+            };
+
+        
+        if self.data_index >= self.data().len() {
+            panic!("index out of bounds");
+        }
+
+        for (&marker, indices) in markers.iter() {
+            for &marked_index in indices.iter() {
+                if marked_index > self.data_index {
+                    self.right_markers.push(CursorRightMarker {
+                        index: marked_index,
+                        marker: marker
+                    });
+
+                } else if marked_index == self.data_index {
+                    self.markers_at.insert(marker);
+
+                } else {
+                    self.left_markers.push(CursorLeftMarker {
+                        index: marked_index,
+                        marker: marker
+                    });
+                }
+            }
+        }
+    }
+
+    fn new(mut index: usize, mut ptr: &'a Link<T, M>) -> Self {
+        let mut stack = Vec::with_capacity(ptr.depth());
+        let total_len = ptr.len();
+
+        loop {
+            match *ptr.borrow() {
+                Flat { .. } => {
+                    let mut cursor = Cursor {
+                        total_len: total_len,
+                        stack: stack,
+                        current: ptr,
+                        data_index: index,
+                        markers_at: HashSet::new(),
+                        left_markers: BinaryHeap::new(),
+                        right_markers: BinaryHeap::new(),
+                    };
+
+                    cursor.finalize();
+                    return cursor;
+                },
+
+                Concat { left_len, ref left, ref right, .. } => {
+                    if index < left_len {
+                        stack.push(CursorStackLink::Left(ptr));
+                        ptr = left;
+                    } else {
+                        index -= left_len;
+                        stack.push(CursorStackLink::Right(ptr));
+                        ptr = right;
+                    }
+                }
+            }
+        }
+    }
+
+    fn get(&self) -> (&T, &HashSet<M>) {
+        (&self.data()[self.data_index], &self.markers_at)
+    }
+
+    traversal!(right, left,
+               CursorStackLink::Right, CursorStackLink::Left,
+               right_markers, CursorRightMarker,
+               left_markers, CursorLeftMarker,
+               |x| x + 1, right);
+
+
 }
 
 impl<'a, T: Clone, M: Eq + Hash + Copy> Values<'a, T, M> {
